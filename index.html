@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Шар памяти — отпусти воспоминание</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: #F8DB98;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 48px;
+            padding: 28px 24px 36px;
+            max-width: 460px;
+            width: 100%;
+            box-shadow: 0 25px 45px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(255, 255, 255, 0.6);
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 600;
+            color: #5C4B3A;
+            margin-bottom: 8px;
+        }
+
+        .sub {
+            color: #8B7355;
+            font-size: 15px;
+            margin-bottom: 28px;
+            border-bottom: 1px solid #E8D5B5;
+            display: inline-block;
+            padding-bottom: 6px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #5C4B3A;
+            margin-bottom: 6px;
+            margin-left: 8px;
+        }
+
+        input {
+            width: 100%;
+            padding: 16px 18px;
+            font-size: 16px;
+            border: 1.5px solid #E8D5B5;
+            border-radius: 44px;
+            background: #ffffff;
+            transition: 0.2s;
+            outline: none;
+            font-family: inherit;
+        }
+
+        input:focus {
+            border-color: #C4A27A;
+            box-shadow: 0 0 0 3px rgba(196, 162, 122, 0.2);
+        }
+
+        .send-btn {
+            background: #C4A27A;
+            border: none;
+            color: white;
+            font-size: 18px;
+            font-weight: 600;
+            padding: 16px 24px;
+            border-radius: 60px;
+            width: 100%;
+            cursor: pointer;
+            margin-top: 12px;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
+        }
+
+        .send-btn:active {
+            transform: scale(0.97);
+            background: #B28C60;
+        }
+
+        .animation-area {
+            display: none;
+            margin-top: 20px;
+            position: relative;
+            min-height: 380px;
+        }
+
+        .balloon-wrapper {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+
+        .balloon {
+            position: relative;
+            width: 180px;
+            height: 200px;
+            animation: floatUp 4.5s cubic-bezier(0.2, 0.9, 0.4, 1.1) forwards;
+        }
+
+        .balloon-body {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, rgba(255,255,240,0.95), #D4B48C);
+            box-shadow: 0 12px 22px rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            position: relative;
+        }
+
+        .balloon-text {
+            color: white;
+            font-weight: 700;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+            font-size: 18px;
+            padding: 12px;
+            word-break: break-word;
+            max-width: 140px;
+        }
+
+        .string {
+            position: absolute;
+            bottom: -38px;
+            left: 50%;
+            width: 2.5px;
+            height: 50px;
+            background: #8B7355;
+            transform: translateX(-50%);
+        }
+
+        .knot {
+            position: absolute;
+            bottom: -12px;
+            left: 50%;
+            width: 10px;
+            height: 10px;
+            background: #A57C5C;
+            border-radius: 2px;
+            transform: translateX(-50%) rotate(45deg);
+        }
+
+        @keyframes floatUp {
+            0% {
+                transform: translateY(0) rotate(0deg);
+                opacity: 1;
+            }
+            70% {
+                opacity: 0.9;
+            }
+            100% {
+                transform: translateY(-420px) rotate(8deg);
+                opacity: 0;
+            }
+        }
+
+        .after-message {
+            margin-top: 40px;
+            font-size: 14px;
+            color: #5C4B3A;
+            background: #FFF8F0;
+            padding: 12px 20px;
+            border-radius: 60px;
+            display: inline-block;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .reset-btn {
+            background: #FFF8F0;
+            border: 1px solid #E8D5B5;
+            padding: 12px 24px;
+            border-radius: 40px;
+            font-size: 15px;
+            font-weight: 500;
+            margin-top: 24px;
+            color: #8B7355;
+            cursor: pointer;
+            width: auto;
+            transition: 0.2s;
+        }
+
+        .reset-btn:active {
+            transform: scale(0.97);
+            background: #F5EDE0;
+        }
+
+        footer {
+            margin-top: 28px;
+            font-size: 12px;
+            color: #B8A07E;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card" id="mainCard">
+    <h1>Шар памяти</h1>
+    <div class="sub">лети высоко, друг</div>
+
+    <div id="formBlock">
+        <div class="input-group">
+            <label>Имя питомца</label>
+            <input type="text" id="petName" maxlength="30">
+        </div>
+        <div class="input-group">
+            <label>Слово или фраза</label>
+            <input type="text" id="message" maxlength="50">
+        </div>
+        <button class="send-btn" id="sendBtn">
+            Отпустить шар
+        </button>
+    </div>
+
+    <div id="animationBlock" class="animation-area">
+        <div class="balloon-wrapper">
+            <div class="balloon" id="floatingBalloon">
+                <div class="balloon-body" id="balloonBody">
+                    <div class="balloon-text" id="balloonText">друг<br></div>
+                </div>
+                <div class="string"></div>
+                <div class="knot"></div>
+            </div>
+        </div>
+        <div class="after-message" id="afterMessage">Твой шар улетает в небо...</div>
+        <button class="reset-btn" id="resetBtn">Отправить ещё один шар</button>
+    </div>
+
+    <footer>память остаётся с тобой навсегда</footer>
+</div>
+
+<script>
+    const colors = ['#E8D5B5', '#D4B48C', '#C4A27A', '#B28C60', '#A57C5C', '#C4D4B5', '#B8C8A8'];
+
+    const sendBtn = document.getElementById('sendBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const formBlock = document.getElementById('formBlock');
+    const animationBlock = document.getElementById('animationBlock');
+    const petNameInput = document.getElementById('petName');
+    const messageInput = document.getElementById('message');
+    const balloonText = document.getElementById('balloonText');
+    const balloonBody = document.getElementById('balloonBody');
+    const afterMessageDiv = document.getElementById('afterMessage');
+
+    function getRandomMessage() {
+        const messages = [
+            'Лети, маленький друг...',
+            'Твоя любовь в небе',
+            'Память становится светом',
+            'Он или она всегда рядом',
+            'Ветер уносит боль, оставляя тепло'
+        ];
+        return messages[Math.floor(Math.random() * messages.length)];
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function launchBalloon(pet, msg) {
+        if (!pet || !msg) return false;
+
+        const randomColor = colors[Math.floor(Math.random() * colors.length)];
+        balloonBody.style.background = `radial-gradient(circle at 30% 30%, #fff, ${randomColor})`;
+        balloonText.innerHTML = `${escapeHtml(pet)}<br>${escapeHtml(msg)}`;
+        afterMessageDiv.textContent = getRandomMessage();
+
+        formBlock.classList.add('hidden');
+        animationBlock.style.display = 'block';
+
+        setTimeout(() => {
+            afterMessageDiv.innerHTML = 'Ты не один. Твоя память осталась здесь';
+        }, 4700);
+    }
+
+    function resetToForm() {
+        animationBlock.style.display = 'none';
+        formBlock.classList.remove('hidden');
+        petNameInput.value = '';
+        messageInput.value = '';
+        balloonText.innerHTML = 'друг<br>';
+        balloonBody.style.background = 'radial-gradient(circle at 30% 30%, #fff, #D4B48C)';
+        afterMessageDiv.innerHTML = 'Твой шар улетает в небо...';
+    }
+
+    sendBtn.addEventListener('click', () => {
+        const petName = petNameInput.value.trim();
+        const message = messageInput.value.trim();
+        
+        if (!petName || !message) {
+            afterMessageDiv.innerHTML = 'Напиши имя и одно слово';
+            afterMessageDiv.style.background = '#FFF0E0';
+            setTimeout(() => {
+                afterMessageDiv.style.background = '#FFF8F0';
+                afterMessageDiv.innerHTML = 'Твой шар улетает в небо...';
+            }, 1800);
+            return;
+        }
+        
+        if (petName.length > 30 || message.length > 50) {
+            afterMessageDiv.innerHTML = 'Имя и фраза слишком длинные';
+            setTimeout(() => {
+                afterMessageDiv.innerHTML = 'Твой шар улетает в небо...';
+            }, 1500);
+            return;
+        }
+        
+        launchBalloon(petName, message);
+    });
+
+    resetBtn.addEventListener('click', () => {
+        resetToForm();
+    });
+
+    animationBlock.style.display = 'none';
+    formBlock.classList.remove('hidden');
+</script>
+</body>
+</html>
