@@ -353,3 +353,482 @@
 </script>
 </body>
 </html>
+
+import sqlite3
+import random
+import asyncio
+from datetime import datetime, timedelta
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram.constants import ParseMode
+
+# ===== НАСТРОЙКИ (ЗАМЕНИТЕ ЭТИ СТРОЧКИ) =====
+TOKEN = "ВАШ_ТОКЕН_ОТ_BOTFATHER"
+WEB_APP_URL = "https://ваш_логин.github.io/balloon-memory/"
+# ================================================
+
+# ===== БАЗА ДАННЫХ =====
+def init_db():
+    conn = sqlite3.connect("balloon_memory.db")
+    c = conn.cursor()
+    
+    # Таблица для шаров (галерея)
+    c.execute('''CREATE TABLE IF NOT EXISTS balloons
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER,
+                  pet_name TEXT,
+                  message TEXT,
+                  date TEXT)''')
+    
+    # Таблица для памятных дат
+    c.execute('''CREATE TABLE IF NOT EXISTS memories
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER,
+                  pet_name TEXT,
+                  date TEXT,
+                  added_date TEXT)''')
+    
+    # Таблица для историй
+    c.execute('''CREATE TABLE IF NOT EXISTS stories
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER,
+                  story TEXT,
+                  date TEXT,
+                  is_approved INTEGER DEFAULT 0)''')
+    
+    # Таблица для поддержки (40 дней)
+    c.execute('''CREATE TABLE IF NOT EXISTS support
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER,
+                  pet_name TEXT,
+                  start_date TEXT,
+                  day INTEGER DEFAULT 1)''')
+    
+    conn.commit()
+    conn.close()
+
+def save_balloon(user_id, pet_name, message):
+    conn = sqlite3.connect("balloon_memory.db")
+    c = conn.cursor()
+    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("INSERT INTO balloons (user_id, pet_name, message, date) VALUES (?, ?, ?, ?)",
+              (user_id, pet_name, message, date))
+    conn.commit()
+    conn.close()
+
+def get_gallery(limit=10):
+    conn = sqlite3.connect("balloon_memory.db")
+    c = conn.cursor()
+    c.execute("SELECT pet_name, message, date FROM balloons ORDER BY date DESC LIMIT ?", (limit,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def add_memory_date(user_id, pet_name, date):
+    conn = sqlite3.connect("balloon_memory.db")
+    c = conn.cursor()
+    added_date = datetime.now().strftime("%Y-%m-%d")
+    c.execute("INSERT INTO memories (user_id, pet_name, date, added_date) VALUES (?, ?, ?, ?)",
+              (user_id, pet_name, date, added_date))
+    conn.commit()
+    conn.close()
+
+def get_memories(user_id):
+    conn = sqlite3.connect("balloon_memory.db")
+    c = conn.cursor()
+    c.execute("SELECT pet_name, date FROM memories WHERE user_id = ? ORDER BY date", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def add_story(user_id, story):
+    conn = sqlite3.connect("balloon_memory.db")
+    c = conn.cursor()
+    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("INSERT INTO stories (user_id, story, date) VALUES (?, ?, ?)", (user_id, story, date))
+    conn.commit()
+    conn.close()
+
+def get_approved_stories(limit=5):
+    conn = sqlite3.connect("balloon_memory.db")
+    c = conn.cursor()
+    c.execute("SELECT story, date FROM stories WHERE is_approved = 1 ORDER BY date DESC LIMIT ?", (limit,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def start_support(user_id, pet_name):
+    conn = sqlite3.connect("balloon_memory.db")
+    c = conn.cursor()
+    start_date = datetime.now().strftime("%Y-%m-%d")
+    c.execute("INSERT INTO support (user_id, pet_name, start_date, day) VALUES (?, ?, ?, 1)",
+              (user_id, pet_name, start_date))
+    conn.commit()
+    conn.close()
+
+def get_support_status(user_id):
+    conn = sqlite3.connect("balloon_memory.db")
+    c = conn.cursor()
+    c.execute("SELECT pet_name, start_date, day FROM support WHERE user_id = ?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def update_support_day(user_id, day):
+    conn = sqlite3.connect("balloon_memory.db")
+    c = conn.cursor()
+    c.execute("UPDATE support SET day = ? WHERE user_id = ?", (day, user_id))
+    conn.commit()
+    conn.close()
+
+# ===== ЦИТАТЫ =====
+QUOTES = [
+    "Пока мы помним — они рядом. Не в теле, но в каждом тёплом воспоминании.",
+    "Любовь не умирает. Она просто меняет форму.",
+    "Твой друг теперь в месте, где нет боли. А ты носишь его в сердце.",
+    "Горе — это цена, которую мы платим за любовь.",
+    "Они приходят в нашу жизнь, чтобы научить нас безусловной любви. А потом уходят, чтобы мы научились отпускать.",
+    "Каждый прожитый вместе день — это подарок, который остаётся с тобой навсегда.",
+    "Неважно, сколько лет прошло. Важно, как сильно ты любил.",
+    "Твоя печаль — это отражение твоей любви. Не стыдись её.",
+    "Они живут в каждом солнечном луче, в каждом тёплом ветре, в каждом воспоминании, которое заставляет сердце сжиматься от любви.",
+    "Ты дал ему лучшую жизнь. Этого достаточно."
+]
+
+# ===== ПОДДЕРЖКА (40 дней) =====
+SUPPORT_MESSAGES = {
+    1: "Сегодня можешь ничего не делать. Просто выдохни. Твоя боль имеет значение.",
+    3: "Если есть силы — напиши одно воспоминание о своём друге. Сохрани его для себя.",
+    7: "Вспомни, как пах твой друг. Этот запах остаётся в памяти навсегда.",
+    14: "Ты справляешься уже две недели. Это много. Позволь себе быть там, где ты есть.",
+    21: "Три недели. Горе волнами накатывает и отступает. Сегодня — просто дыши.",
+    30: "Месяц без него. Это трудно. Но ты держишься. Я рядом.",
+    40: "Сорок дней. Важный рубеж. Твоя любовь никуда не ушла. Она просто стала другой — тихой, тёплой, всегда с тобой."
+}
+
+# ===== КОМАНДЫ =====
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [KeyboardButton("Отправить шар памяти")],
+        [KeyboardButton("Галерея памяти"), KeyboardButton("Цитата дня")],
+        [KeyboardButton("Истории других"), KeyboardButton("Добавить свою историю")],
+        [KeyboardButton("Памятные даты"), KeyboardButton("Поддержка (40 дней)")]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    await update.message.reply_text(
+        "Здравствуйте.\n\n"
+        "Это место, где можно отпустить в небо шар в память о питомце.\n\n"
+        "Здесь вы можете:\n"
+        "• Отправить шар памяти\n"
+        "• Посмотреть галерею чужих шаров\n"
+        "• Почитать истории других людей\n"
+        "• Сохранить памятные даты\n"
+        "• Получить поддержку на 40 дней\n\n"
+        "Выберите действие на кнопках ниже.",
+        reply_markup=reply_markup
+    )
+
+async def balloon(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    webapp_keyboard = [[KeyboardButton(
+        text="Запустить шар",
+        web_app=WebAppInfo(url=WEB_APP_URL)
+    )]]
+    reply_markup = ReplyKeyboardMarkup(webapp_keyboard, resize_keyboard=True)
+    
+    await update.message.reply_text(
+        "Нажмите на кнопку, чтобы открыть страницу с шаром.\n\n"
+        "Напишите имя питомца и одно слово. Шар улетит в небо.\n\n"
+        "После отправки шара он сохранится в галерее памяти.",
+        reply_markup=reply_markup
+    )
+
+async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = update.message.web_app_data.data
+    if data:
+        try:
+            import json
+            payload = json.loads(data)
+            pet_name = payload.get("pet_name", "")
+            message = payload.get("message", "")
+            user_id = update.effective_user.id
+            
+            if pet_name and message:
+                save_balloon(user_id, pet_name, message)
+                
+                keyboard = [[InlineKeyboardButton("Посмотреть галерею", callback_data="gallery")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(
+                    f"Шар с именем {pet_name} сохранён в галерее памяти.\n\n"
+                    f"Ваше воспоминание теперь здесь навсегда.",
+                    reply_markup=reply_markup
+                )
+        except:
+            pass
+
+async def gallery(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    balloons = get_gallery(10)
+    if not balloons:
+        await update.message.reply_text("Пока нет ни одного шара. Станьте первым.")
+        return
+    
+    text = "Галерея памяти\n\n"
+    for pet_name, message, date in balloons:
+        date_short = date[:10] if date else "дата неизвестна"
+        text += f"• {pet_name} — {message}\n  {date_short}\n\n"
+    
+    await update.message.reply_text(text)
+
+async def quote(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    quote = random.choice(QUOTES)
+    await update.message.reply_text(f"✨ {quote}")
+
+async def show_stories(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    stories = get_approved_stories(5)
+    if not stories:
+        await update.message.reply_text("Пока нет ни одной истории. Добавьте свою командой /share")
+        return
+    
+    text = "Истории других людей\n\n"
+    for story, date in stories:
+        date_short = date[:10] if date else "дата неизвестна"
+        text += f"📖 {story}\n({date_short})\n\n"
+    
+    await update.message.reply_text(text)
+
+async def add_story_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["waiting_for_story"] = True
+    await update.message.reply_text(
+        "Напишите свою историю. Это может быть любое воспоминание о вашем питомце.\n\n"
+        "История будет опубликована после проверки (анонимно)."
+    )
+
+async def save_story(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("waiting_for_story"):
+        story = update.message.text
+        user_id = update.effective_user.id
+        add_story(user_id, story)
+        context.user_data.pop("waiting_for_story")
+        await update.message.reply_text(
+            "Спасибо за вашу историю. Она будет опубликована после проверки."
+        )
+
+async def show_memories(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    memories = get_memories(user_id)
+    
+    if not memories:
+        await update.message.reply_text(
+            "У вас нет сохранённых памятных дат.\n\n"
+            "Добавьте дату командой:\n"
+            "/remember Имя питомца ГГГГ-ММ-ДД\n\n"
+            "Например: /remember Барсик 2024-03-27"
+        )
+        return
+    
+    text = "Ваши памятные даты:\n\n"
+    for pet_name, date in memories:
+        text += f"• {pet_name} — {date}\n"
+    
+    await update.message.reply_text(text)
+
+async def add_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        args = context.args
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Используйте: /remember Имя питомца ГГГГ-ММ-ДД\n\n"
+                "Пример: /remember Барсик 2024-03-27"
+            )
+            return
+        
+        pet_name = args[0]
+        date = args[1]
+        
+        # Проверка формата даты
+        datetime.strptime(date, "%Y-%m-%d")
+        
+        user_id = update.effective_user.id
+        add_memory_date(user_id, pet_name, date)
+        
+        await update.message.reply_text(
+            f"Дата {date} для {pet_name} сохранена.\n"
+            f"В этот день я пришлю вам напоминание."
+        )
+    except ValueError:
+        await update.message.reply_text("Неверный формат даты. Используйте ГГГГ-ММ-ДД")
+
+async def start_support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    status = get_support_status(user_id)
+    
+    if status:
+        pet_name, start_date, day = status
+        await update.message.reply_text(
+            f"Вы уже получаете поддержку для {pet_name}.\n"
+            f"День {day} из 40.\n\n"
+            f"Я буду присылать вам сообщения каждый день."
+        )
+        return
+    
+    context.user_data["waiting_for_pet_support"] = True
+    await update.message.reply_text(
+        "Напишите имя питомца, для которого вы хотите получить поддержку на 40 дней.\n\n"
+        "Каждый день я буду присылать вам тёплые слова."
+    )
+
+async def save_support_pet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("waiting_for_pet_support"):
+        pet_name = update.message.text
+        user_id = update.effective_user.id
+        start_support(user_id, pet_name)
+        context.user_data.pop("waiting_for_pet_support")
+        
+        await update.message.reply_text(
+            f"Поддержка для {pet_name} началась.\n\n"
+            f"{SUPPORT_MESSAGES[1]}\n\n"
+            f"Завтра пришлю новое сообщение."
+        )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    
+    if text == "Отправить шар памяти":
+        await balloon(update, context)
+    elif text == "Галерея памяти":
+        await gallery(update, context)
+    elif text == "Цитата дня":
+        await quote(update, context)
+    elif text == "Истории других":
+        await show_stories(update, context)
+    elif text == "Добавить свою историю":
+        await add_story_command(update, context)
+    elif text == "Памятные даты":
+        await show_memories(update, context)
+    elif text == "Поддержка (40 дней)":
+        await start_support_command(update, context)
+    elif context.user_data.get("waiting_for_story"):
+        await save_story(update, context)
+    elif context.user_data.get("waiting_for_pet_support"):
+        await save_support_pet(update, context)
+    else:
+        keyboard = [
+            [KeyboardButton("Отправить шар памяти")],
+            [KeyboardButton("Галерея памяти"), KeyboardButton("Цитата дня")],
+            [KeyboardButton("Истории других"), KeyboardButton("Добавить свою историю")],
+            [KeyboardButton("Памятные даты"), KeyboardButton("Поддержка (40 дней)")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text(
+            "Используйте кнопки для навигации:",
+            reply_markup=reply_markup
+        )
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "gallery":
+        balloons = get_gallery(10)
+        if not balloons:
+            await query.edit_message_text("Пока нет ни одного шара.")
+            return
+        
+        text = "Галерея памяти\n\n"
+        for pet_name, message, date in balloons:
+            date_short = date[:10] if date else "дата неизвестна"
+            text += f"• {pet_name} — {message}\n  {date_short}\n\n"
+        
+        await query.edit_message_text(text)
+
+# ===== ПРОВЕРКА ПАМЯТНЫХ ДАТ (ЗАПУСКАТЬ РАЗ В ДЕНЬ) =====
+async def check_memories(app):
+    while True:
+        try:
+            conn = sqlite3.connect("balloon_memory.db")
+            c = conn.cursor()
+            today = datetime.now().strftime("%Y-%m-%d")
+            c.execute("SELECT user_id, pet_name, date FROM memories WHERE date = ?", (today,))
+            rows = c.fetchall()
+            conn.close()
+            
+            for user_id, pet_name, date in rows:
+                try:
+                    await app.bot.send_message(
+                        user_id,
+                        f"Сегодня {date} — день памяти {pet_name}.\n\n"
+                        f"Хотите отправить шар? Используйте кнопку «Отправить шар памяти»."
+                    )
+                except:
+                    pass
+        except:
+            pass
+        
+        await asyncio.sleep(86400)  # 24 часа
+
+# ===== ПРОВЕРКА ПОДДЕРЖКИ (40 дней) =====
+async def check_support(app):
+    while True:
+        try:
+            conn = sqlite3.connect("balloon_memory.db")
+            c = conn.cursor()
+            c.execute("SELECT user_id, pet_name, start_date, day FROM support WHERE day <= 40")
+            rows = c.fetchall()
+            conn.close()
+            
+            for user_id, pet_name, start_date, day in rows:
+                start = datetime.strptime(start_date, "%Y-%m-%d").date()
+                today = datetime.now().date()
+                days_passed = (today - start).days + 1
+                
+                if days_passed == day and day <= 40:
+                    message = SUPPORT_MESSAGES.get(day, f"День {day}. Держитесь. Я рядом.")
+                    if day == 40:
+                        message += "\n\nПоддержка завершена. Если нужно, начните заново командой /support"
+                    
+                    try:
+                        await app.bot.send_message(user_id, f"💫 День {day} из 40 для {pet_name}\n\n{message}")
+                        update_support_day(user_id, day + 1)
+                    except:
+                        pass
+        except:
+            pass
+        
+        await asyncio.sleep(3600)  # 1 час
+
+# ===== ЗАПУСК =====
+def main():
+    init_db()
+    
+    app = Application.builder().token(TOKEN).build()
+    
+    # Команды
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("balloon", balloon))
+    app.add_handler(CommandHandler("gallery", gallery))
+    app.add_handler(CommandHandler("quote", quote))
+    app.add_handler(CommandHandler("stories", show_stories))
+    app.add_handler(CommandHandler("share", add_story_command))
+    app.add_handler(CommandHandler("memories", show_memories))
+    app.add_handler(CommandHandler("remember", add_remember))
+    app.add_handler(CommandHandler("support", start_support_command))
+    
+    # Обработчики
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
+    app.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Запускаем фоновые задачи
+    async def post_init(application):
+        asyncio.create_task(check_memories(application))
+        asyncio.create_task(check_support(application))
+    
+    app.post_init = post_init
+    
+    print("Бот запущен. Напишите /start в Telegram")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
+                    
